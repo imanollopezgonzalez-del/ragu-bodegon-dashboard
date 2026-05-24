@@ -149,24 +149,32 @@ def _get(row: dict, *keys, default=None):
 
 
 def _to_id(row: dict, fecha: date, tabla: str, idx: int) -> str:
-    """ID único: usa el que venga en la API; si no, fabricamos uno determinístico para que el upsert sea idempotente."""
+    """ID único: intenta construir uno estable desde la API; fallback a índice."""
+    # ID explícito de la API (si existe)
     rid = _get(row, "id", "transaction_id", "trans_id", "nro", "nro_comprobante", "numero", "ticket")
     if rid:
         return f"{tabla}_{rid}"
+    # Para ventas: productocode + rubroname + fecha → estable entre corridas
+    pcode   = _get(row, "productocode", "productcode", "cod_producto")
+    rname   = _get(row, "rubroname", "rubro", "category")
+    if pcode is not None:
+        safe_rname = str(rname or "").replace(" ", "_")[:30]
+        return f"{tabla}_{fecha.isoformat()}_{safe_rname}_{pcode}"
     return f"{tabla}_{fecha.isoformat()}_{idx:06d}"
 
 
 def map_venta(row: dict, fecha: date, idx: int) -> dict:
+    # La API devuelve 'rubroname' y 'productoname' (confirmado en dry-run 2026-05-24)
     return {
         "transaction_id": _to_id(row, fecha, "ventas", idx),
         "fecha":          fecha.isoformat(),
         "tienda":         TIENDA,
-        "rubro":          _get(row, "rubro"),
-        "producto":       _get(row, "producto", "producto_desc", "descripcion"),
-        "unidades":       _get(row, "unidades", "cantidad"),
-        "monto":          _get(row, "monto", "importe", "total"),
-        "descuento":      _get(row, "descuento", "desc"),
-        "dolar":          _get(row, "dolar", "dolar_oficial", "cotizacion"),
+        "rubro":          _get(row, "rubroname", "rubro", "category"),
+        "producto":       _get(row, "productoname", "producto", "productoDesc", "descripcion"),
+        "unidades":       _get(row, "unidades", "cantidad", "qty"),
+        "monto":          _get(row, "monto", "importe", "total", "amount"),
+        "descuento":      _get(row, "descuento", "discount", "desc"),
+        "dolar":          _get(row, "dolar", "dolar_oficial", "cotizacion", "usd"),
         "raw_data":       row,
     }
 
@@ -292,8 +300,15 @@ def main():
 
     print(f"Ragu Bodegón sync — desde {desde} hasta {hasta} — tablas: {','.join(tablas)} — dry_run={args.dry_run}")
 
+    # Delay entre tablas para no superar el rate limit de la Cloud Function.
+    # El primer sync no necesita espera — el delay se aplica ENTRE tablas.
+    INTER_TABLE_DELAY = float(os.environ.get("INTER_TABLE_DELAY", "45"))
+
     had_error = False
-    for t in tablas:
+    for i, t in enumerate(tablas):
+        if i > 0:
+            print(f"  ⏳ esperando {INTER_TABLE_DELAY:.0f}s (rate limit)...")
+            time.sleep(INTER_TABLE_DELAY)
         r = sync_tabla(t, desde, hasta, args.dry_run)
         if r.status == "ok":
             print(f"  ✓ {t}: {r.rows_fetched} filas fetched, {r.rows_upserted} upserted")
