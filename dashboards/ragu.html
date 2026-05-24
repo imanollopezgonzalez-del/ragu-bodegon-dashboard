@@ -2627,10 +2627,11 @@ async function loadFromSupabase() {
   }
 
   try {
-    // Fetch ventas, tickets y dólar rates en paralelo para mayor velocidad
-    const [ventasMes, ticketsMes, dolarRates] = await Promise.all([
+    // Fetch ventas, tickets, cobros y dólar rates en paralelo
+    const [ventasMes, ticketsMes, cobrosMes, dolarRates] = await Promise.all([
       sb('v_ventas_mensual',  'select=*&order=anio.asc,mes.asc'),
       sb('v_tickets_mensual', 'select=*&order=anio.asc,mes.asc'),
+      sb('v_cobros_mensual',  'select=*&order=anio.asc,mes.asc'),
       fetchDolarMonthly()
     ]);
 
@@ -2649,12 +2650,12 @@ async function loadFromSupabase() {
         producto: r.producto || '',
         unidades: Number(r.unidades || 0),
         monto,
-        dolar:    rate ? monto / rate : 0   // USD = ARS / tipo de cambio blue promedio del mes
+        dolar:    rate ? monto / rate : 0
       };
     });
 
-    // 2) TICKETS — vista mensual por sector → estructura "canal" del dashboard
-    const canal = ticketsMes.map(r => {
+    // 2) TICKETS — filas tipo 'sector': facturación/comensales por Mostrador/Salon/Web
+    const ticketsSector = ticketsMes.map(r => {
       const monto      = Number(r.monto      || 0);
       const comensales = Number(r.comensales || 0);
       const proformas  = Number(r.proformas  || 0);
@@ -2662,7 +2663,7 @@ async function loadFromSupabase() {
       return {
         anio:               String(r.anio),
         mes:                MES_MAP[r.mes] || String(r.mes),
-        moneda:             'Pesos',
+        moneda:             '',
         monto,
         dolar:              rate ? monto / rate : 0,
         cobranzas:          0,
@@ -2672,9 +2673,32 @@ async function loadFromSupabase() {
         monto_por_proforma: proformas  ? monto / proformas  : 0,
         monto_por_comensal: comensales ? monto / comensales : 0,
         dolar_comensal:     rate && comensales ? monto / comensales / rate : 0,
+        tipo:               'sector'
+      };
+    });
+
+    // 3) COBROS — filas tipo 'canal': distribución Efectivo/Tarjeta y conteo de cobranzas
+    const cobrosCanal = cobrosMes.map(r => {
+      const monto = Number(r.monto || 0);
+      const rate  = blueRate(r.anio, r.mes);
+      return {
+        anio:               String(r.anio),
+        mes:                MES_MAP[r.mes] || String(r.mes),
+        moneda:             r.medio_pago || 'Otros',
+        monto,
+        dolar:              rate ? monto / rate : 0,
+        cobranzas:          Number(r.transacciones || 0),
+        sector:             '',
+        comensales:         0,
+        proformas:          0,
+        monto_por_proforma: 0,
+        monto_por_comensal: 0,
+        dolar_comensal:     0,
         tipo:               'canal'
       };
     });
+
+    const canal = [...ticketsSector, ...cobrosCanal];
 
     // 3) GASTOS — la API no los devuelve. Traemos lo cargado manualmente.
     let gd = [];
