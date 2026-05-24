@@ -204,8 +204,13 @@ def map_venta(row: dict, fecha: date, idx: int) -> dict:
 def map_cobro(row: dict, fecha: date, idx: int) -> dict:
     # Estructura confirmada 2026-05-24:
     # ticketid (UUID), monedaname, total, tiponame (sector), mesaname, chargedate, groupid
+    # Un ticket puede tener varios cobros (Efectivo + Tarjeta) → incluimos monedaname en el ID.
     ticket_id = _get(row, "ticketid", "ticket_id", "id")
-    tid = f"cobros_{ticket_id}" if ticket_id else f"cobros_{fecha.isoformat()}_{idx:06d}"
+    moneda    = _get(row, "monedaname", "moneda", "") or ""
+    if ticket_id:
+        tid = f"cobros_{ticket_id}_{moneda}".rstrip("_")
+    else:
+        tid = f"cobros_{fecha.isoformat()}_{idx:06d}"
     return {
         "transaction_id": tid,
         "fecha":          fecha.isoformat(),
@@ -236,6 +241,25 @@ def map_ticket(row: dict, fecha: date, idx: int) -> dict:
         "dolar":          _get(row, "dolar", "dolar_oficial", "cotizacion"),
         "raw_data":       row,
     }
+
+
+def _dedup_merge(rows: list[dict]) -> list[dict]:
+    """
+    Si la API devuelve varias filas con el mismo transaction_id en el mismo batch
+    (ej: varias ventas del mismo producto en el día), las fusiona sumando los campos
+    numéricos. Evita el error de Supabase "ON CONFLICT DO UPDATE cannot affect row twice".
+    """
+    merged: dict[str, dict] = {}
+    for row in rows:
+        tid = row["transaction_id"]
+        if tid not in merged:
+            merged[tid] = dict(row)
+        else:
+            for field in ("unidades", "monto", "descuento", "comensales", "proformas"):
+                v = row.get(field)
+                if v is not None:
+                    merged[tid][field] = (merged[tid].get(field) or 0) + v
+    return list(merged.values())
 
 
 MAPPERS = {
@@ -274,13 +298,16 @@ def sync_tabla(tabla: str, desde: date, hasta: date, dry_run: bool) -> SyncResul
             data = call_api(f, tabla)
             for i, row in enumerate(data):
                 fetched.append(mapper(row, f, i))
+        deduped = _dedup_merge(fetched)
+        if len(deduped) < len(fetched):
+            print(f"  [dedup] {tabla}: {len(fetched)} → {len(deduped)} filas (merged duplicates)")
         upserted = 0
         if dry_run:
-            print(f"[dry-run] {tabla}: traería {len(fetched)} filas")
-            if fetched:
-                print(f"[dry-run] muestra primera fila:\n{json.dumps(fetched[0], indent=2, default=str)}")
+            print(f"[dry-run] {tabla}: traería {len(deduped)} filas")
+            if deduped:
+                print(f"[dry-run] muestra primera fila:\n{json.dumps(deduped[0], indent=2, default=str)}")
         else:
-            upserted, _ = supabase_upsert(tabla, fetched)
+            upserted, _ = supabase_upsert(tabla, deduped)
 
         entry = {
             "started_at":   started.isoformat(),
