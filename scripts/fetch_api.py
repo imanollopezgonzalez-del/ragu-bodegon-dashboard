@@ -27,6 +27,7 @@ import argparse
 import json
 import os
 import sys
+import time
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
@@ -56,21 +57,40 @@ TABLAS = ("ventas", "cobros", "tickets")
 # ─────────────────────────────────────────────────────────────
 # HTTP helpers
 # ─────────────────────────────────────────────────────────────
+# Delay entre requests para no superar el rate limit de la Cloud Function
+API_DELAY_SECONDS = float(os.environ.get("API_DELAY_SECONDS", "3"))
+
+
 def call_api(fecha: date, tabla: str, timeout: int = 60) -> list[dict[str, Any]]:
     """POST a la Cloud Function y devuelve la lista de transacciones del día."""
     payload = {"fecha": fecha.isoformat(), "tienda": TIENDA, "tabla": tabla}
     headers = {"Content-Type": "application/json", "x-api-secret": API_AUTH_SECRET}
     r = requests.post(API_BASE_URL, json=payload, headers=headers, timeout=timeout)
-    r.raise_for_status()
+
+    if not r.ok:
+        # Imprime la respuesta cruda para diagnosticar errores de la API
+        print(f"[API error] {tabla} {fecha}: HTTP {r.status_code} — {r.text[:500]}")
+        r.raise_for_status()
+
     data = r.json()
-    # La forma exacta del JSON la confirmamos en el primer dry-run.
-    # Asumimos que devuelve una lista, o {"data": [...]} o {"results": [...]}.
+
+    # Si es rate limit u otro error embebido en un 200, lo detectamos
+    if isinstance(data, dict) and data.get("status") == "error":
+        raise ValueError(f"API error en {tabla} {fecha}: {data.get('msg', data)}")
+
     if isinstance(data, list):
+        time.sleep(API_DELAY_SECONDS)
         return data
-    for key in ("data", "results", "rows", "items"):
+
+    for key in ("data", "results", "rows", "items", "registros", "ventas", "cobros", "tickets"):
         if isinstance(data.get(key), list):
+            time.sleep(API_DELAY_SECONDS)
             return data[key]
-    raise ValueError(f"Respuesta API inesperada (no es lista ni tiene data/results): {type(data).__name__}")
+
+    # No pudimos parsear — imprimimos la estructura completa para diagnosticar
+    print(f"[dry-run diagnóstico] respuesta cruda de {tabla} {fecha}:")
+    print(json.dumps(data, indent=2, ensure_ascii=False, default=str)[:2000])
+    raise ValueError(f"Respuesta API inesperada — keys: {list(data.keys()) if isinstance(data, dict) else type(data).__name__}")
 
 
 def supabase_upsert(table: str, rows: list[dict[str, Any]]) -> tuple[int, int]:
