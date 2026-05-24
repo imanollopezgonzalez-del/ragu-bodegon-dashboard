@@ -1,0 +1,62 @@
+name: Fetch data — Ragu Bodegón
+
+on:
+  # Cron en UTC. Argentina = UTC-3.
+  #   11:00 UTC = 08:00 ART
+  #   15:00 UTC = 12:00 ART
+  # GitHub puede retrasar los cron 5–15 min en horas pico, no afecta para reportes.
+  schedule:
+    - cron: "0 11 * * *"
+    - cron: "0 15 * * *"
+
+  # Ejecución manual desde la UI (para backfill o reintentos)
+  workflow_dispatch:
+    inputs:
+      desde:
+        description: "Fecha desde (YYYY-MM-DD). Vacío = lookback automático."
+        required: false
+      hasta:
+        description: "Fecha hasta (YYYY-MM-DD). Vacío = hoy."
+        required: false
+      tabla:
+        description: "Solo una tabla (ventas|cobros|tickets). Vacío = todas."
+        required: false
+      dry_run:
+        description: "Dry-run (true/false)"
+        required: false
+        default: "false"
+
+concurrency:
+  group: fetch-data
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: scripts/requirements.txt
+
+      - name: Install deps
+        run: pip install -r scripts/requirements.txt
+
+      - name: Run fetch_api.py
+        env:
+          API_BASE_URL:         ${{ secrets.API_BASE_URL }}
+          API_AUTH_SECRET:      ${{ secrets.API_AUTH_SECRET }}
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          TIENDA:               ragu
+        run: |
+          ARGS=""
+          if [ -n "${{ inputs.desde }}" ]; then ARGS="$ARGS --desde ${{ inputs.desde }}"; fi
+          if [ -n "${{ inputs.hasta }}" ]; then ARGS="$ARGS --hasta ${{ inputs.hasta }}"; fi
+          if [ -n "${{ inputs.tabla }}" ]; then ARGS="$ARGS --tabla ${{ inputs.tabla }}"; fi
+          if [ "${{ inputs.dry_run }}" = "true" ]; then ARGS="$ARGS --dry-run"; fi
+          python scripts/fetch_api.py $ARGS

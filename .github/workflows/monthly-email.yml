@@ -1,0 +1,46 @@
+name: Monthly email — Ragu Bodegón
+
+on:
+  # Día 1 de cada mes, 11:00 UTC = 08:00 ART
+  schedule:
+    - cron: "0 11 1 * *"
+
+  # Disparo manual para probar
+  workflow_dispatch:
+    inputs:
+      anio:
+        description: "Año del mes a reportar (YYYY). Vacío = mes anterior al actual."
+        required: false
+      mes:
+        description: "Mes (1-12). Vacío = mes anterior al actual."
+        required: false
+
+jobs:
+  email:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: scripts/requirements.txt
+
+      - name: Install deps
+        run: pip install -r scripts/requirements.txt
+
+      - name: Send monthly summary
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          GMAIL_USER:           ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD:   ${{ secrets.GMAIL_APP_PASSWORD }}
+          EMAIL_TO:             ${{ secrets.EMAIL_TO }}
+          TIENDA:               ragu
+        run: |
+          ARGS=""
+          if [ -n "${{ inputs.anio }}" ]; then ARGS="$ARGS --anio ${{ inputs.anio }}"; fi
+          if [ -n "${{ inputs.mes }}" ];  then ARGS="$ARGS --mes ${{ inputs.mes }}";   fi
+          python scripts/send_monthly_email.py $ARGS
