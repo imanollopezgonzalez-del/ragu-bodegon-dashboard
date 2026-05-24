@@ -219,9 +219,10 @@ def map_cobro(row: dict, fecha: date, idx: int) -> dict:
 
 
 def map_ticket(row: dict, fecha: date, idx: int) -> dict:
-    # Estructura pendiente de confirmar (tickets lo agregó Nicolás 2026-05-23).
-    # Usamos tolerancia amplia hasta hacer un dry-run exitoso.
-    ticket_id = _get(row, "ticketid", "ticket_id", "id", "nro", "proformaid")
+    # Estructura confirmada 2026-05-24:
+    # ticketid (UUID), tiponame (sector), comensales, total, mesaname, ticketdate, groupid
+    # Cada fila = 1 ticket/proforma → proformas=1 por fila; la vista suma para el total mensual.
+    ticket_id = _get(row, "ticketid", "ticket_id", "id")
     tid = f"tickets_{ticket_id}" if ticket_id else f"tickets_{fecha.isoformat()}_{idx:06d}"
     return {
         "transaction_id": tid,
@@ -229,9 +230,9 @@ def map_ticket(row: dict, fecha: date, idx: int) -> dict:
         "tienda":         TIENDA,
         "sector":         _get(row, "tiponame", "sector", "tipo"),
         "comensales":     _get(row, "comensales", "covers", "pax"),
-        "proformas":      _get(row, "proformas", "proformaid", "tickets", "count"),
+        "proformas":      1,          # cada fila es un ticket; la vista hace SUM para el conteo
         "monto":          _get(row, "total", "monto", "importe", "amount"),
-        "cobranzas":      _get(row, "cobranzas", "cobros", "collected"),
+        "cobranzas":      None,       # cobros está en la tabla 'cobros', no en tickets
         "dolar":          _get(row, "dolar", "dolar_oficial", "cotizacion"),
         "raw_data":       row,
     }
