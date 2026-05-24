@@ -61,36 +61,58 @@ TABLAS = ("ventas", "cobros", "tickets")
 API_DELAY_SECONDS = float(os.environ.get("API_DELAY_SECONDS", "3"))
 
 
+RATE_LIMIT_RETRY_WAIT = float(os.environ.get("RATE_LIMIT_RETRY_WAIT", "75"))  # segundos
+RATE_LIMIT_MAX_RETRIES = int(os.environ.get("RATE_LIMIT_MAX_RETRIES", "3"))
+
+
 def call_api(fecha: date, tabla: str, timeout: int = 60) -> list[dict[str, Any]]:
-    """POST a la Cloud Function y devuelve la lista de transacciones del día."""
+    """POST a la Cloud Function y devuelve la lista de transacciones del día.
+    Reintenta automáticamente si la API responde con rate limit."""
     payload = {"fecha": fecha.isoformat(), "tienda": TIENDA, "tabla": tabla}
     headers = {"Content-Type": "application/json", "x-api-secret": API_AUTH_SECRET}
-    r = requests.post(API_BASE_URL, json=payload, headers=headers, timeout=timeout)
 
-    if not r.ok:
-        # Imprime la respuesta cruda para diagnosticar errores de la API
-        print(f"[API error] {tabla} {fecha}: HTTP {r.status_code} — {r.text[:500]}")
-        r.raise_for_status()
+    for attempt in range(1, RATE_LIMIT_MAX_RETRIES + 1):
+        r = requests.post(API_BASE_URL, json=payload, headers=headers, timeout=timeout)
 
-    data = r.json()
+        # Rate limit: 400 o 429 con msg "Ratelimit superado"
+        is_ratelimit = (not r.ok and r.status_code in (400, 429) and "Ratelimit" in r.text)
+        if is_ratelimit:
+            wait = RATE_LIMIT_RETRY_WAIT * attempt
+            print(f"[rate limit] {tabla} {fecha}: intento {attempt}/{RATE_LIMIT_MAX_RETRIES} — esperando {wait:.0f}s...")
+            time.sleep(wait)
+            continue
 
-    # Si es rate limit u otro error embebido en un 200, lo detectamos
-    if isinstance(data, dict) and data.get("status") == "error":
-        raise ValueError(f"API error en {tabla} {fecha}: {data.get('msg', data)}")
+        if not r.ok:
+            print(f"[API error] {tabla} {fecha}: HTTP {r.status_code} — {r.text[:500]}")
+            r.raise_for_status()
 
-    if isinstance(data, list):
-        time.sleep(API_DELAY_SECONDS)
-        return data
+        data = r.json()
 
-    for key in ("data", "results", "rows", "items", "registros", "ventas", "cobros", "tickets"):
-        if isinstance(data.get(key), list):
+        # Error embebido en 200 OK
+        if isinstance(data, dict) and data.get("status") == "error":
+            msg = data.get("msg", "")
+            if "Ratelimit" in msg and attempt < RATE_LIMIT_MAX_RETRIES:
+                wait = RATE_LIMIT_RETRY_WAIT * attempt
+                print(f"[rate limit 200] {tabla} {fecha}: intento {attempt}/{RATE_LIMIT_MAX_RETRIES} — esperando {wait:.0f}s...")
+                time.sleep(wait)
+                continue
+            raise ValueError(f"API error en {tabla} {fecha}: {msg or data}")
+
+        if isinstance(data, list):
             time.sleep(API_DELAY_SECONDS)
-            return data[key]
+            return data
 
-    # No pudimos parsear — imprimimos la estructura completa para diagnosticar
-    print(f"[dry-run diagnóstico] respuesta cruda de {tabla} {fecha}:")
-    print(json.dumps(data, indent=2, ensure_ascii=False, default=str)[:2000])
-    raise ValueError(f"Respuesta API inesperada — keys: {list(data.keys()) if isinstance(data, dict) else type(data).__name__}")
+        for key in ("data", "results", "rows", "items", "registros", "ventas", "cobros", "tickets"):
+            if isinstance(data.get(key), list):
+                time.sleep(API_DELAY_SECONDS)
+                return data[key]
+
+        # No pudimos parsear — imprimimos la estructura completa para diagnosticar
+        print(f"[diagnóstico] respuesta cruda de {tabla} {fecha}:")
+        print(json.dumps(data, indent=2, ensure_ascii=False, default=str)[:2000])
+        raise ValueError(f"Respuesta API inesperada — keys: {list(data.keys()) if isinstance(data, dict) else type(data).__name__}")
+
+    raise ValueError(f"Rate limit no se levantó después de {RATE_LIMIT_MAX_RETRIES} intentos ({tabla} {fecha})")
 
 
 def supabase_upsert(table: str, rows: list[dict[str, Any]]) -> tuple[int, int]:
