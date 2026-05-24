@@ -33,7 +33,9 @@ concurrency:
 jobs:
   fetch:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # 360 min = máximo permitido por GitHub. El cron diario termina en ~5 min.
+    # Los backfills largos necesitan el margen completo.
+    timeout-minutes: 360
     steps:
       - uses: actions/checkout@v4
 
@@ -53,6 +55,7 @@ jobs:
           SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           TIENDA:               ragu
+          PYTHONUNBUFFERED:     "1"    # output visible en tiempo real en los logs
         run: |
           ARGS=""
           if [ -n "${{ inputs.desde }}" ]; then ARGS="$ARGS --desde ${{ inputs.desde }}"; fi
