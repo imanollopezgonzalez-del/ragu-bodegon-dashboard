@@ -176,9 +176,14 @@ def _to_id(row: dict, fecha: date, tabla: str, idx: int) -> str:
     rid = _get(row, "id", "transaction_id", "trans_id", "nro", "nro_comprobante", "numero", "ticket")
     if rid:
         return f"{tabla}_{rid}"
-    # Para ventas: productocode + rubroname + fecha → estable entre corridas
-    pcode   = _get(row, "productocode", "productcode", "cod_producto")
-    rname   = _get(row, "rubroname", "rubro", "category")
+    # ticketid (UUID) + productocode → ID estable por línea de ticket
+    # Ventas devuelve ticketid igual que cobros/tickets. Mejor que rubroname+fecha.
+    ticketid = _get(row, "ticketid", "ticket_id")
+    pcode    = _get(row, "productocode", "productcode", "cod_producto")
+    if ticketid and pcode is not None:
+        return f"{tabla}_{ticketid}_{pcode}"
+    # Fallback: rubroname + productocode + fecha (sin ticketid)
+    rname = _get(row, "rubroname", "rubro", "category")
     if pcode is not None:
         safe_rname = str(rname or "").replace(" ", "_")[:30]
         return f"{tabla}_{fecha.isoformat()}_{safe_rname}_{pcode}"
