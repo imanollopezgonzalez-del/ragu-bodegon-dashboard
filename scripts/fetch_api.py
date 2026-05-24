@@ -202,28 +202,36 @@ def map_venta(row: dict, fecha: date, idx: int) -> dict:
 
 
 def map_cobro(row: dict, fecha: date, idx: int) -> dict:
+    # Estructura confirmada 2026-05-24:
+    # ticketid (UUID), monedaname, total, tiponame (sector), mesaname, chargedate, groupid
+    ticket_id = _get(row, "ticketid", "ticket_id", "id")
+    tid = f"cobros_{ticket_id}" if ticket_id else f"cobros_{fecha.isoformat()}_{idx:06d}"
     return {
-        "transaction_id": _to_id(row, fecha, "cobros", idx),
+        "transaction_id": tid,
         "fecha":          fecha.isoformat(),
         "tienda":         TIENDA,
-        "medio_pago":     _get(row, "medio_pago", "medio", "forma_pago"),
-        "moneda":         _get(row, "moneda"),
-        "monto":          _get(row, "monto", "importe", "total"),
+        "medio_pago":     _get(row, "monedaname", "medio_pago", "medio", "forma_pago"),
+        "moneda":         _get(row, "monedaname", "moneda"),   # "Tarjeta" / "Efectivo"
+        "monto":          _get(row, "total", "monto", "importe", "amount"),
         "dolar":          _get(row, "dolar", "dolar_oficial", "cotizacion"),
         "raw_data":       row,
     }
 
 
 def map_ticket(row: dict, fecha: date, idx: int) -> dict:
+    # Estructura pendiente de confirmar (tickets lo agregó Nicolás 2026-05-23).
+    # Usamos tolerancia amplia hasta hacer un dry-run exitoso.
+    ticket_id = _get(row, "ticketid", "ticket_id", "id", "nro", "proformaid")
+    tid = f"tickets_{ticket_id}" if ticket_id else f"tickets_{fecha.isoformat()}_{idx:06d}"
     return {
-        "transaction_id": _to_id(row, fecha, "tickets", idx),
+        "transaction_id": tid,
         "fecha":          fecha.isoformat(),
         "tienda":         TIENDA,
-        "sector":         _get(row, "sector"),
-        "comensales":     _get(row, "comensales"),
-        "proformas":      _get(row, "proformas"),
-        "monto":          _get(row, "monto", "importe", "total"),
-        "cobranzas":      _get(row, "cobranzas"),
+        "sector":         _get(row, "tiponame", "sector", "tipo"),
+        "comensales":     _get(row, "comensales", "covers", "pax"),
+        "proformas":      _get(row, "proformas", "proformaid", "tickets", "count"),
+        "monto":          _get(row, "total", "monto", "importe", "amount"),
+        "cobranzas":      _get(row, "cobranzas", "cobros", "collected"),
         "dolar":          _get(row, "dolar", "dolar_oficial", "cotizacion"),
         "raw_data":       row,
     }
