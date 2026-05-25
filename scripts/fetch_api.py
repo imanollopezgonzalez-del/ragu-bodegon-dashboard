@@ -57,8 +57,8 @@ TABLAS = ("ventas", "cobros", "tickets")
 # ─────────────────────────────────────────────────────────────
 # HTTP helpers
 # ─────────────────────────────────────────────────────────────
-# Delay entre requests para no superar el rate limit de la Cloud Function
-API_DELAY_SECONDS = float(os.environ.get("API_DELAY_SECONDS", "3"))
+# Delay entre requests — la API tolera ~1 req/80s; 80s evita el rate limit sin esperar el retry
+API_DELAY_SECONDS = float(os.environ.get("API_DELAY_SECONDS", "80"))
 
 
 RATE_LIMIT_RETRY_WAIT = float(os.environ.get("RATE_LIMIT_RETRY_WAIT", "75"))  # segundos
