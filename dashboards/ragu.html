@@ -902,7 +902,7 @@
       <div class="chart-header">
         <div>
           <div class="chart-title">Facturación por Sector</div>
-          <div class="chart-subtitle">Mostrador · Salón · Web</div>
+          <div class="chart-subtitle" id="subtitleSector">Por canal de atención</div>
         </div>
         <div class="chart-tag">Sector</div>
       </div>
@@ -1615,12 +1615,18 @@ function buildCanalCharts() {
       sectorMap[r.sector].count++;
     }
   });
-  const sectorOrder = ['Mostrador','Salon','Web'];
+  const SECTOR_DISPLAY = { salon: 'Salón', takeaway: 'Takeaway' };
+  const sectorOrder = ['salon', 'takeaway'];
   const allSectors = Object.keys(sectorMap).filter(s => s && s !== 'Sin sector');
   const sectorEntries = [
     ...sectorOrder.filter(s => sectorMap[s]),
     ...allSectors.filter(s => !sectorOrder.includes(s)).sort()
   ];
+  const sectorLabels = sectorEntries.map(s => SECTOR_DISPLAY[s] || s.charAt(0).toUpperCase() + s.slice(1));
+
+  // Actualiza el subtítulo con los sectores reales
+  const subSector = document.getElementById('subtitleSector');
+  if (subSector && sectorLabels.length) subSector.textContent = sectorLabels.join(' · ');
 
   // ── Aggregate by MONEDA (canal rows) ──
   const monedaMap = {};
@@ -1660,7 +1666,7 @@ function buildCanalCharts() {
   makeChart('chartSector', {
     type: 'bar',
     data: {
-      labels: sectorEntries,
+      labels: sectorLabels,
       datasets: [{ label: currency==='USD'?'Monto (USD)':'Monto (ARS)',
         data: sectorEntries.map(s => currency==='USD' ? sectorMap[s].dolar : sectorMap[s].monto),
         backgroundColor: sectorColors, borderColor: sectorBorder, borderWidth:1, borderRadius:8 }]
@@ -1679,10 +1685,10 @@ function buildCanalCharts() {
 
   // ── Insight cards: comensales por sector ──
   const ins = document.getElementById('insightSector');
-  if (ins) ins.innerHTML = sectorEntries.map(s => `
+  if (ins) ins.innerHTML = sectorEntries.map((s, i) => `
     <div class="insight-card">
       <div class="insight-val">${Math.round(sectorMap[s].comensales).toLocaleString('es-AR')}</div>
-      <div class="insight-lbl">Comensales · ${s}</div>
+      <div class="insight-lbl">Comensales · ${sectorLabels[i]}</div>
     </div>`).join('');
 
   // ── Chart 3: Cobranzas por canal ──
@@ -1712,7 +1718,7 @@ function buildCanalCharts() {
   makeChart('chartComensales', {
     type: 'bar',
     data: {
-      labels: sectorEntries,
+      labels: sectorLabels,
       datasets: [{ label:'Ticket por comensal',
         data: sectorEntries.map(s => {
           const m = sectorMap[s];
