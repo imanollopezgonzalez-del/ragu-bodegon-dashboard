@@ -296,55 +296,63 @@ def daterange(start: date, end: date):
 
 def sync_tabla(tabla: str, desde: date, hasta: date, dry_run: bool) -> SyncResult:
     started = datetime.now(timezone.utc)
-    fetched: list[dict] = []
+    total_fetched = 0
+    total_upserted = 0
     try:
         mapper = MAPPERS[tabla]
         for f in daterange(desde, hasta):
             data = call_api(f, tabla)
-            for i, row in enumerate(data):
-                fetched.append(mapper(row, f, i))
-        deduped = _dedup_merge(fetched)
-        if len(deduped) < len(fetched):
-            print(f"  [dedup] {tabla}: {len(fetched)} → {len(deduped)} filas (merged duplicates)")
-        upserted = 0
-        if dry_run:
-            print(f"[dry-run] {tabla}: traería {len(deduped)} filas")
-            if deduped:
-                print(f"[dry-run] muestra primera fila:\n{json.dumps(deduped[0], indent=2, default=str)}")
-        else:
-            upserted, _ = supabase_upsert(tabla, deduped)
+            day_rows = [mapper(row, f, i) for i, row in enumerate(data)]
+            total_fetched += len(day_rows)
+
+            if not day_rows:
+                print(f"  {tabla} {f}: 0 filas")
+                continue
+
+            deduped = _dedup_merge(day_rows)
+            if len(deduped) < len(day_rows):
+                print(f"  [dedup] {tabla} {f}: {len(day_rows)} → {len(deduped)} filas")
+
+            if dry_run:
+                print(f"[dry-run] {tabla} {f}: {len(deduped)} filas")
+                if deduped and f == desde:
+                    print(f"[dry-run] muestra primera fila:\n{json.dumps(deduped[0], indent=2, default=str)}")
+            else:
+                upserted, _ = supabase_upsert(tabla, deduped)
+                total_upserted += upserted
+                print(f"  ✓ {tabla} {f}: {upserted} filas")
 
         entry = {
-            "started_at":   started.isoformat(),
-            "finished_at":  datetime.now(timezone.utc).isoformat(),
-            "tabla":        tabla,
-            "fecha_desde":  desde.isoformat(),
-            "fecha_hasta":  hasta.isoformat(),
-            "rows_fetched": len(fetched),
-            "rows_inserted": upserted,
+            "started_at":    started.isoformat(),
+            "finished_at":   datetime.now(timezone.utc).isoformat(),
+            "tabla":         tabla,
+            "fecha_desde":   desde.isoformat(),
+            "fecha_hasta":   hasta.isoformat(),
+            "rows_fetched":  total_fetched,
+            "rows_inserted": total_upserted,
             "rows_updated":  0,
-            "status":       "ok",
+            "status":        "ok",
         }
         if not dry_run:
             supabase_insert_sync_log(entry)
-        return SyncResult(tabla, desde, hasta, len(fetched), upserted, "ok")
+        return SyncResult(tabla, desde, hasta, total_fetched, total_upserted, "ok")
 
     except Exception as e:
         entry = {
-            "started_at":   started.isoformat(),
-            "finished_at":  datetime.now(timezone.utc).isoformat(),
-            "tabla":        tabla,
-            "fecha_desde":  desde.isoformat(),
-            "fecha_hasta":  hasta.isoformat(),
-            "rows_fetched": len(fetched),
-            "rows_inserted": 0,
+            "started_at":    started.isoformat(),
+            "finished_at":   datetime.now(timezone.utc).isoformat(),
+            "tabla":         tabla,
+            "fecha_desde":   desde.isoformat(),
+            "fecha_hasta":   hasta.isoformat(),
+            "rows_fetched":  total_fetched,
+            "rows_inserted": total_upserted,
             "rows_updated":  0,
-            "status":       "error",
+            "status":        "error",
             "error_message": str(e)[:1000],
         }
         if not dry_run:
             supabase_insert_sync_log(entry)
-        return SyncResult(tabla, desde, hasta, len(fetched), 0, "error", str(e))
+        return SyncResult(tabla, desde, hasta, total_fetched, total_upserted, "error", str(e))
 
 
 def main():
