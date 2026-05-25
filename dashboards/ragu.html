@@ -1616,7 +1616,11 @@ function buildCanalCharts() {
     }
   });
   const sectorOrder = ['Mostrador','Salon','Web'];
-  const sectorEntries = sectorOrder.filter(s => sectorMap[s]);
+  const allSectors = Object.keys(sectorMap).filter(s => s && s !== 'Sin sector');
+  const sectorEntries = [
+    ...sectorOrder.filter(s => sectorMap[s]),
+    ...allSectors.filter(s => !sectorOrder.includes(s)).sort()
+  ];
 
   // ── Aggregate by MONEDA (canal rows) ──
   const monedaMap = {};
@@ -1649,8 +1653,10 @@ function buildCanalCharts() {
   });
 
   // ── Chart 2: Facturación por sector (bar) ──
-  const sectorColors = ['rgba(245,200,0,0.8)','rgba(46,139,87,0.8)','rgba(90,138,184,0.8)'];
-  const sectorBorder = ['#C9A400','#2e8b57','#5a8ab8'];
+  const sectorColorPalette = ['rgba(245,200,0,0.8)','rgba(46,139,87,0.8)','rgba(90,138,184,0.8)','rgba(217,64,64,0.8)','rgba(160,120,64,0.8)'];
+  const sectorBorderPalette = ['#C9A400','#2e8b57','#5a8ab8','#d94040','#a07840'];
+  const sectorColors = sectorEntries.map((_, i) => sectorColorPalette[i % sectorColorPalette.length]);
+  const sectorBorder = sectorEntries.map((_, i) => sectorBorderPalette[i % sectorBorderPalette.length]);
   makeChart('chartSector', {
     type: 'bar',
     data: {
